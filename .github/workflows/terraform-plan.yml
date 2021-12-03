@@ -1,0 +1,267 @@
+name: Terraform Plan
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: ワーキングディレクトリ
+        type: string
+        required: true
+      aws-region:
+        description: AWSのリージョン名
+        type: string
+        default: ap-northeast-1
+        required: false
+      gcp-project-id:
+        description: |
+          GCPのプロジェクトのプロジェクトID。
+          https://cloud.google.com/resource-manager/docs/creating-managing-projects
+        type: string
+        required: false
+      gcp-project-number:
+        description: |
+          GCPのプロジェクトのプロジェクト番号。
+          https://cloud.google.com/resource-manager/docs/creating-managing-projects
+        type: string
+        required: false
+    secrets:
+      aws-access-key-id:
+        description: AWSアクセスキーID
+        required: true
+      aws-secret-access-key:
+        description: AWSシークレットアクセスキー
+        required: true
+      github-token:
+        description: GitHubのトークン
+        required: true
+      github-machine-user-token:
+        description: GitHubマシンユーザのトークン
+        required: true
+      github-machine-user-ssh-key:
+        description: GitHubマシンユーザのSSH秘密鍵
+        required: true
+      slack-webhook-url:
+        description: SlackのWebhook URL
+        required: false
+      dd-api-key:
+        description: DatadogのAPIキー
+        required: false
+      dd-app-key:
+        description: DatadogのAppキー
+        required: false
+      pagerduty-token:
+        description: PagerDutyのトークン
+        required: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    name: Terraform Plan
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+
+      - name: GCP認証その1
+        if: inputs.gcp-project-id
+        uses: google-github-actions/setup-gcloud@v0.2
+        with:
+          project_id: ${{ inputs.gcp-project-id }}
+
+      - name: GCP認証その2
+        if: inputs.gcp-project-id
+        id: auth
+        uses: google-github-actions/auth@v0.4.0
+        with:
+          create_credentials_file: 'true'
+          workload_identity_provider: projects/${{ inputs.gcp-project-number }}/locations/global/workloadIdentityPools/github-actions/providers/github-actions-provider
+          service_account: terraform@${{ inputs.gcp-project-id }}.iam.gserviceaccount.com
+          access_token_lifetime: 600s
+
+      - name: GCP認証その3
+        if: inputs.gcp-project-id
+        run: |
+          gcloud auth login --brief --cred-file="${{ steps.auth.outputs.credentials_file_path }}"
+
+      - name: Get Terraform version
+        id: terraform-version
+        uses: bigwheel/get-terraform-version-action@v1.1.0
+        with:
+          path: ${{ inputs.working-directory }}
+
+      - name: AWS認証情報を設定
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.aws-access-key-id }}
+          aws-secret-access-key: ${{ secrets.aws-secret-access-key }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: ${{ steps.terraform-version.outputs.terraform-version }}
+          terraform_wrapper: false
+
+      - name: Install SSH key # private repositoryのmoduleを参照するためssh鍵を置いている
+        uses: shimataro/ssh-key-action@8ddce4efa1dc93160617224cdadf97c23bb3814a # v2.0.3 特にセキュリティリスクが高いActionなのでコミットハッシュで参照する
+        with:
+          key: ${{ secrets.github-machine-user-ssh-key }}
+          # ssh-keyscan -t rsa github.com
+          known_hosts: 'github.com ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEAq2A7hRGmdnm9tUDbO9IDSwBK6TbQa+PXYPCPy6rbTrTtw7PHkccKrpp0yVhp5HdEIcKr6pLlVDBfOLX9QUsyCOV0wzfjIJNlGEYsdlLJizHhbn2mUjvSAHQqZETYP81eFzLQNnPHt4EVVUh7VfDESU84KezmD5QlWpXLmvU31/yMf+Se8xhHTvKSCZIFImWwoG6mbUoWf9nzpIoaSjB+weqqUUmpaaasXVal72J+UX2B+2RPW3RcT0eOzQgqlJL3RKrTJvdsjE3JEAvGq3lGHSZXy28G3skua2SmVi/w4yCE6gbODqnTWlg7+wC604ydGXA8VJiS5ap43JXiUFFAaQ=='
+
+      - name: Terraform Format
+        run: |
+          terraform fmt \
+            -check \
+            -recursive
+
+      - name: Terraform Init
+        run: |
+          terraform init
+
+      - name: Terraform Validate
+        run: |
+          terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        env:
+          TF_VAR_github_token: ${{ secrets.github-machine-user-token }}
+          TF_VAR_dd_api_key: ${{ secrets.dd-api-key }}
+          TF_VAR_dd_app_key: ${{ secrets.dd-app-key }}
+          TF_VAR_pagerduty_token: ${{ secrets.pagerduty-token }}
+        run: |
+          set +e
+          terraform plan \
+            -detailed-exitcode \
+            -input=false \
+            -no-color \
+            -out tfplan
+          echo "::set-output name=exitcode::$?"
+          set -e
+
+      - name: Process exit code
+        id: plan-exitcode
+        run: |
+          planExitcode=${{ steps.plan.outputs.exitcode }}
+          if [ ${planExitcode} -eq 0 ]; then
+            planHasChanges=false
+          elif [ ${planExitcode} -eq 2 ]; then
+            planHasChanges=true
+          else
+            exit ${planExitcode}
+          fi
+          echo "::set-output name=plan-has-changes::${planHasChanges}"
+
+      - name: Read Terraform Result
+        # if: ${{ steps.plan-exitcode.outputs.plan-has-changes }}
+        id: plan-result
+        run: |
+          PLAN_RESULT=$(terraform show tfplan)
+
+          # エスケープ処理 (https://github.community/t/set-output-truncates-multiline-strings/16852/3)
+          PLAN_RESULT="${PLAN_RESULT//'%'/'%25'}"
+          PLAN_RESULT="${PLAN_RESULT//$'\n'/'%0A'}"
+          PLAN_RESULT="${PLAN_RESULT//$'\r'/'%0D'}"
+
+          echo "::set-output name=plan-result::${PLAN_RESULT}"
+
+      - name: Retrieve resource changes
+        id: changing-resources
+        run: |
+          terraform show -json tfplan | jq -rc '.resource_changes' > tfplan.resource_changes.json
+
+          # Ref: https://www.terraform.io/docs/internals/json-format.html#change-representation
+          RESOURCES_TO_BE_REPLACED=$(
+            jq -c '. | map(select(.change.actions | length==2) ) | [.[].address]' < tfplan.resource_changes.json
+          )
+          RESOURCES_TO_BE_CREATED=$(
+            jq -c '. | map(select(.change.actions | length==1 and .[0] == "create") ) | [.[].address]' < tfplan.resource_changes.json
+          )
+          RESOURCES_TO_BE_DELETED=$(
+            jq -c '. | map(select(.change.actions | length==1 and .[0] == "delete") ) | [.[].address]' < tfplan.resource_changes.json
+          )
+          RESOURCES_TO_BE_UPDATED=$(
+            jq -c '. | map(select(.change.actions | length==1 and .[0] == "update") ) | [.[].address]' < tfplan.resource_changes.json
+          )
+
+          echo "::set-output name=resources-to-be-replaced::${RESOURCES_TO_BE_REPLACED}"
+          echo "::set-output name=resources-to-be-created::${RESOURCES_TO_BE_CREATED}"
+          echo "::set-output name=resources-to-be-deleted::${RESOURCES_TO_BE_DELETED}"
+          echo "::set-output name=resources-to-be-updated::${RESOURCES_TO_BE_UPDATED}"
+
+      - name: Comment to PR
+        uses: actions/github-script@v5.0.0
+        env:
+          PLAN_HAS_CHANGES: ${{ steps.plan-exitcode.outputs.plan-has-changes }}
+          PLAN_RESULT: ${{ steps.plan-result.outputs.plan-result }}
+          RESOURCES_TO_BE_REPLACED: ${{ steps.changing-resources.outputs.resources-to-be-replaced }}
+          RESOURCES_TO_BE_CREATED: ${{ steps.changing-resources.outputs.resources-to-be-created }}
+          RESOURCES_TO_BE_DELETED: ${{ steps.changing-resources.outputs.resources-to-be-deleted }}
+          RESOURCES_TO_BE_UPDATED: ${{ steps.changing-resources.outputs.resources-to-be-updated }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        with:
+          github-token: ${{ secrets.github-token }}
+          script: |
+            const planHasChanges = `${process.env.PLAN_HAS_CHANGES}` === 'true';
+
+            if (!planHasChanges) {
+              // No diff
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `**No changes.**
+                       *Working Directory: \`${process.env.WORKING_DIRECTORY}\`*`
+              });
+              process.exit(0);
+            }
+
+            // https://stackoverflow.com/a/29497680/4006322
+            const planResult =
+                `${process.env.PLAN_RESULT}`.replace(
+                    /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
+                    ''
+                );
+            const regexResult = /\n(Plan:.*)\n/g.exec(planResult);
+            const resultSummary = regexResult[1];
+
+            const resourcesToBeReplaced = JSON.parse(process.env.RESOURCES_TO_BE_REPLACED)
+            const resourcesToBeCreated = JSON.parse(process.env.RESOURCES_TO_BE_CREATED)
+            const resourcesToBeDeleted = JSON.parse(process.env.RESOURCES_TO_BE_DELETED)
+            const resourcesToBeUpdated = JSON.parse(process.env.RESOURCES_TO_BE_UPDATED)
+            const changingResources = "```diff\n"
+            + [].concat(
+                resourcesToBeCreated.map(resourceName => `+ ${resourceName} will be created.`),
+                resourcesToBeDeleted.map(resourceName => `- ${resourceName} will be destroyed.`),
+                resourcesToBeUpdated.map(resourceName => `! ${resourceName} will be updated in-place.`),
+                resourcesToBeReplaced.map(resourceName => `- ${resourceName} will be replaced.`),
+              ).join('\n')
+            + "\n```"
+
+            const body = `
+            # Plan Summary
+            **${resultSummary}**
+            *Working Directory:* \`${process.env.WORKING_DIRECTORY}\`
+            ## Resouces to be changed
+            ${changingResources}
+
+            # Plan Details
+            <details>
+              <summary>terraform plan detail</summary>
+
+            \`\`\`terraform
+            ${planResult}
+            \`\`\`
+            </details>`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
