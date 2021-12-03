@@ -1,0 +1,134 @@
+name: Terraform Apply
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: ワーキングディレクトリ
+        type: string
+        required: true
+      aws-region:
+        description: AWSのリージョン名
+        type: string
+        default: ap-northeast-1
+        required: false
+      gcp-project-id:
+        description: |
+          GCPのプロジェクトのプロジェクトID。
+          https://cloud.google.com/resource-manager/docs/creating-managing-projects
+        type: string
+        required: false
+      gcp-project-number:
+        description: |
+          GCPのプロジェクトのプロジェクト番号。
+          https://cloud.google.com/resource-manager/docs/creating-managing-projects
+        type: string
+        required: false
+    secrets:
+      aws-access-key-id:
+        description: AWSアクセスキーID
+        required: true
+      aws-secret-access-key:
+        description: AWSシークレットアクセスキー
+        required: true
+      github-machine-user-token:
+        description: GitHubマシンユーザのトークン
+        required: true
+      github-machine-user-ssh-key:
+        description: GitHubマシンユーザのSSH秘密鍵
+        required: true
+      slack-webhook-url:
+        description: SlackのWebhook URL
+        required: true
+      dd-api-key:
+        description: DatadogのAPIキー
+        required: false
+      dd-app-key:
+        description: DatadogのAppキー
+        required: false
+      pagerduty-token:
+        description: PagerDutyのトークン
+        required: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    name: Terraform Apply
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+
+      - name: GCP認証その1
+        if: inputs.gcp-project-id
+        uses: google-github-actions/setup-gcloud@v0.2
+        with:
+          project_id: ${{ inputs.gcp-project-id }}
+
+      - name: GCP認証その2
+        if: inputs.gcp-project-id
+        id: auth
+        uses: google-github-actions/auth@v0.4.0
+        with:
+          create_credentials_file: 'true'
+          workload_identity_provider: projects/${{ inputs.gcp-project-number }}/locations/global/workloadIdentityPools/github-actions/providers/github-actions-provider
+          service_account: terraform@${{ inputs.gcp-project-id }}.iam.gserviceaccount.com
+          access_token_lifetime: 600s
+
+      - name: GCP認証その3
+        if: inputs.gcp-project-id
+        run: |
+          gcloud auth login --brief --cred-file="${{ steps.auth.outputs.credentials_file_path }}"
+
+      - name: Get Terraform version
+        id: terraform-version
+        uses: bigwheel/get-terraform-version-action@v1.1.0
+        with:
+          path: ${{ inputs.working-directory }}
+
+      - name: AWS認証情報を設定
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.aws-access-key-id }}
+          aws-secret-access-key: ${{ secrets.aws-secret-access-key }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: ${{ steps.terraform-version.outputs.terraform-version }}
+
+      - name: Install SSH key # private repositoryのmoduleを参照するためssh鍵を置いている
+        uses: shimataro/ssh-key-action@8ddce4efa1dc93160617224cdadf97c23bb3814a # v2.0.3 特にセキュリティリスクが高いActionなのでコミットハッシュで参照する
+        with:
+          key: ${{ secrets.github-machine-user-ssh-key }}
+          # ssh-keyscan -t rsa github.com
+          known_hosts: 'github.com ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEAq2A7hRGmdnm9tUDbO9IDSwBK6TbQa+PXYPCPy6rbTrTtw7PHkccKrpp0yVhp5HdEIcKr6pLlVDBfOLX9QUsyCOV0wzfjIJNlGEYsdlLJizHhbn2mUjvSAHQqZETYP81eFzLQNnPHt4EVVUh7VfDESU84KezmD5QlWpXLmvU31/yMf+Se8xhHTvKSCZIFImWwoG6mbUoWf9nzpIoaSjB+weqqUUmpaaasXVal72J+UX2B+2RPW3RcT0eOzQgqlJL3RKrTJvdsjE3JEAvGq3lGHSZXy28G3skua2SmVi/w4yCE6gbODqnTWlg7+wC604ydGXA8VJiS5ap43JXiUFFAaQ=='
+
+      - name: Terraform Init
+        run: |
+          terraform init
+
+      - name: Terraform Apply
+        id: plan
+        env:
+          TF_VAR_github_token: ${{ secrets.github-machine-user-token }}
+          TF_VAR_dd_api_key: ${{ secrets.dd-api-key }}
+          TF_VAR_dd_app_key: ${{ secrets.dd-app-key }}
+          TF_VAR_pagerduty_token: ${{ secrets.pagerduty-token }}
+        run: |
+          terraform apply \
+            -auto-approve \
+            -input=false
+
+      - name: Terraform Apply 失敗時のSlack通知
+        if: failure() || cancelled()
+        uses: lazy-actions/slatify@master
+        with:
+          job_name: "*Terraform Apply*"
+          type: ${{ job.status }}
+          url: ${{ secrets.slack-webhook-url }}
