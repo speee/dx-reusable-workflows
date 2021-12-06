@@ -60,6 +60,9 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     name: Terraform Plan
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         shell: bash
