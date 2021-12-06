@@ -1,0 +1,20 @@
+name: actionlint
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/**
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Run actionlint with reviewdog output
+        uses: reviewdog/action-actionlint@v1
+        with:
+          level: info
+          reporter: github-pr-review
