@@ -52,6 +52,9 @@ on:
       pagerduty-token:
         description: PagerDutyのトークン
         required: false
+      all-proxy:
+        description: 環境変数 `ALL_PROXY` に設定する値
+        required: false
 
 jobs:
   plan:
@@ -134,6 +137,7 @@ jobs:
           TF_VAR_dd_api_key: ${{ secrets.dd-api-key }}
           TF_VAR_dd_app_key: ${{ secrets.dd-app-key }}
           TF_VAR_pagerduty_token: ${{ secrets.pagerduty-token }}
+          ALL_PROXY: ${{ secrets.all-proxy }}
         run: |
           set +e
           terraform plan \
