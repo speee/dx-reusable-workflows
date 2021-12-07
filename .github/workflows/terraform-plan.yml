@@ -12,6 +12,7 @@ on:
         type: string
         default: ap-northeast-1
         required: false
+      # NOTE: OIDCを利用する場合はcaller workflow側のjobに`id-token`のwrite権限を追加する必要がある
       gcp-project-id:
         description: |
           GCPのプロジェクトのプロジェクトID。
@@ -40,9 +41,6 @@ on:
       github-machine-user-ssh-key:
         description: GitHubマシンユーザのSSH秘密鍵
         required: true
-      slack-webhook-url:
-        description: SlackのWebhook URL
-        required: false
       dd-api-key:
         description: DatadogのAPIキー
         required: false
