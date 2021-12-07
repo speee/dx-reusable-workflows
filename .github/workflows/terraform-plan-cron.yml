@@ -145,7 +145,7 @@ jobs:
           echo "::set-output name=plan-has-changes::${planHasChanges}"
 
       - name: Terraform Plan差分発生時のSlack通知
-        if: failure() || steps.plan-exitcode.outputs.plan-has-changes == 'true'
+        if: (failure() || steps.plan-exitcode.outputs.plan-has-changes == 'true') && github.event_name == 'schedule'
         uses: lazy-actions/slatify@master
         with:
           job_name: "*Terraform Plan差分検知*"
