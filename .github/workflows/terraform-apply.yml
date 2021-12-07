@@ -49,6 +49,9 @@ on:
       pagerduty-token:
         description: PagerDutyのトークン
         required: false
+      sentry-auth-token:
+        description: Sentryのトークン
+        required: false
       all-proxy:
         description: 環境変数 `ALL_PROXY` に設定する値
         required: false
@@ -123,6 +126,7 @@ jobs:
           TF_VAR_dd_api_key: ${{ secrets.dd-api-key }}
           TF_VAR_dd_app_key: ${{ secrets.dd-app-key }}
           TF_VAR_pagerduty_token: ${{ secrets.pagerduty-token }}
+          TF_VAR_sentry_auth_token: ${{ secrets.sentry-auth-token }}
           ALL_PROXY: ${{ secrets.all-proxy }}
         run: |
           terraform apply \
