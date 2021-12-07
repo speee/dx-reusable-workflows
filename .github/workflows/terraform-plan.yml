@@ -40,9 +40,6 @@ on:
       github-machine-user-ssh-key:
         description: GitHubマシンユーザのSSH秘密鍵
         required: true
-      slack-webhook-url:
-        description: SlackのWebhook URL
-        required: false
       dd-api-key:
         description: DatadogのAPIキー
         required: false
