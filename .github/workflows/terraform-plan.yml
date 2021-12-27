@@ -122,6 +122,7 @@ jobs:
           terraform fmt \
             -check \
             -recursive
+        working-directory: ${{ github.workspace }}
 
       - name: Terraform Init
         run: |
