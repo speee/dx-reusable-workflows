@@ -61,6 +61,7 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     name: Terraform Plan
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash
