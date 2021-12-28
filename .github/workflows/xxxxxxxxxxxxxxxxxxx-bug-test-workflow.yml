@@ -1,0 +1,22 @@
+name: Bug test workflow
+
+on: push
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    name: Bug test workflow
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: '1.0.8'
+          terraform_wrapper: false
+
+      - name: Terraform version
+        run: terraform version
