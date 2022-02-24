@@ -10,7 +10,8 @@ on:
       ref:
         description: CIを実行するブランチ名
         type: string
-        required: true
+        required: false
+        default: ''
       aws-region:
         description: AWSのリージョン名
         type: string
