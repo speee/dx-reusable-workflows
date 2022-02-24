@@ -7,6 +7,10 @@ on:
         description: ワーキングディレクトリ
         type: string
         required: true
+      ref:
+        description: CIを実行するブランチ名
+        type: string
+        required: true
       aws-region:
         description: AWSのリージョン名
         type: string
@@ -69,6 +73,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: GCP認証その1
         if: inputs.gcp-project-id
