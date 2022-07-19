@@ -9,9 +9,9 @@ jobs:
       - name: Run Kubernetes tools
         uses: stefanprodan/kube-tools@v1.7.1
         with:
-          kubectl: 1.22.0
-          kustomize: 4.2.0
-          kubeval: v0.16.1
+          kubectl: "1.22.0"
+          kustomize: "4.2.0"
+          kubeval: "v0.16.1"
           command: |
             kubeval --version
             kustomize version
