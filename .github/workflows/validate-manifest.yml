@@ -1,0 +1,21 @@
+---
+name: validate-manifest
+jobs:
+  validate-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Run Kubernetes tools
+        uses: stefanprodan/kube-tools@v1.7.1
+        with:
+          kubectl: "1.22.0"
+          kustomize: "4.2.0"
+          kubeval: "v0.16.1"
+          command: |
+            kubeval --version
+            kustomize version
+            kustomize build ./testdata/kubernetes/overlays/production | kubeval --ignore-missing-schemas --strict
+"on":
+  workflow_dispatch: {}
+  push: {}
